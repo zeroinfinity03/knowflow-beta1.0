@@ -1,0 +1,68 @@
+# Web Server
+fastapi[standard]
+uvicorn
+python-multipart
+jinja2
+
+# Environment and Utils
+python-dotenv
+requests
+pydantic
+nest_asyncio
+
+# AI and ML
+google-genai
+# genai==0.3.0
+google-generativeai
+sentence-transformers
+llama-index-core
+llama-index-embeddings-huggingface
+llama-index-readers-file
+llama-parse
+chromadb
+
+langchain_google_genai
+langchain>=0.1.0
+pandas>=2.0
+matplotlib>=3.7
+seaborn>=0.12
+langchain-community>=0.1.0
+langchain_experimental
+tabulate
+plotly
+langchain-ollama
+langchain-huggingface
+transformers[agents]
+
+
+# Google Cloud Services
+google-cloud-texttospeech
+
+# Additional dependencies
+aiohttp
+certifi
+
+# WebSocket
+websockets==14.1
+asyncio==3.4.3
+
+# Gradio
+gradio-client
+
+# Image processing
+Pillow
+pytesseract
+
+
+langchain>=0.1.0
+pandas>=2.0
+matplotlib>=3.7
+seaborn>=0.12
+langchain-community>=0.1.0
+langchain_experimental
+tabulate
+plotly
+langchain-ollama
+langchain-huggingface
+transformers[agents]
+
