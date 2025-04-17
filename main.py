@@ -4,7 +4,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, JSONResponse
 from agents.text_agent import TextAgent
 from agents.imagegen_agent import ImageGenAgent
-from agents.object_detection_agent import ObjectDetectionAgent
 from agents.rag_agent import RagAgent
 from agents.web_agent import WebAgent
 from agents.local_agent import LocalAgent
@@ -18,8 +17,23 @@ import asyncio
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 
+# Try to import ObjectDetectionAgent but handle import errors gracefully
+try:
+    from agents.object_detection_agent import ObjectDetectionAgent
+    object_detection_available = True
+except Exception as e:
+    print(f"Warning: Object detection functionality is not available: {e}")
+    object_detection_available = False
+
 # Load environment variables
 load_dotenv()
+
+# Create credentials directory if it doesn't exist
+credentials_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials")
+if not os.path.exists(credentials_dir):
+    os.makedirs(credentials_dir)
+    print(f"Created credentials directory at {credentials_dir}")
+    print("Please place your Google Cloud credentials JSON file in this directory.")
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -99,15 +113,21 @@ async def chat(message: ChatMessage):
                 return StreamingResponse(generate_response(), media_type="application/x-ndjson")
         elif message.is_video_mode and message.audio_data and message.image_data:
             # Use ObjectDetectionAgent for audio + image input
-            object_detection_agent = ObjectDetectionAgent()
-            async def generate_response():
-                async for chunk in object_detection_agent.process_input(message.audio_data, message.image_data):
-                    yield chunk + "\n"
+            if object_detection_available:
+                object_detection_agent = ObjectDetectionAgent()
+                async def generate_response():
+                    async for chunk in object_detection_agent.process_input(message.audio_data, message.image_data):
+                        yield chunk + "\n"
                         
-            return StreamingResponse(
-                generate_response(),
-                media_type="application/x-ndjson"
-            )
+                return StreamingResponse(
+                    generate_response(),
+                    media_type="application/x-ndjson"
+                )
+            else:
+                return StreamingResponse(
+                    iter([json.dumps({"error": "Object detection functionality is not available"})]),
+                    status_code=500
+                )
         elif message.is_image_mode:
             # Use ImageGenAgent for image generation
             image_agent = ImageGenAgent()
@@ -212,9 +232,16 @@ async def websocket_endpoint(websocket: WebSocket):
             "data": "Connected to server"
         }))
         
-        # Use the global live_agent instance
-        await live_agent.start_session(websocket)
-        
+        try:
+            # Use the global live_agent instance
+            await live_agent.start_session(websocket)
+        except Exception as e:
+            print(f"Error in live agent session: {e}")
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "data": f"Error starting session: {str(e)}"
+            }))
+            
     except WebSocketDisconnect:
         print("WebSocket disconnected")
     except Exception as e:
