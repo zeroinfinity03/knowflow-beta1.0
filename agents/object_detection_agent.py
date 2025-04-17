@@ -10,44 +10,11 @@ import pathlib
 # Load environment variables first
 load_dotenv()
 
-# Get and validate the credentials path
+# Define a global variable to hold the credentials path
 credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 if not credentials_path:
-    raise ValueError("GOOGLE_APPLICATION_CREDENTIALS not found in .env file")
-
-# Convert relative path to absolute if needed
-if not os.path.isabs(credentials_path):
-    base_dir = pathlib.Path(__file__).parent.parent
-    credentials_path = os.path.join(base_dir, credentials_path)
-
-# Verify the credentials file exists
-if not os.path.exists(credentials_path):
-    raise ValueError(f"Google Cloud credentials file not found at: {credentials_path}")
-
-# Set the environment variable with the absolute path
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-
-DEFAULT_PROMPT = """
-You are a helpful AI assistant. When you receive audio and an image:
-1. Focus on answering the question asked in the audio in the same language.
-2. If the question is asked in Hindi, reply in Hindi. If in Spanish, reply in Spanish.
-3. Only describe the image if the question is about the image, I repeat if no queesion is asked in the audio then dont say anything.
-4. Don't describe that you received an audio or image input.
-5. If the question is about a particular product analyze first what is that product actually by reading the label etc then answer about that product from your knowledgebase.
-6. At the end of your response, add: "Question asked in: [language]"
-
-Example 1:
-If audio asks: "How many calories in this chocolate?"
-Bad response: "The audio contains someone asking about calories. The image shows a chocolate bar..."
-Good response: "This Ghirardelli 86% dark chocolate bar contains 190 calories per serving (40g).
-Question asked in: English"
-
-Example 2:
-If audio asks: "इस चॉकलेट में कितनी कैलोरी हैं?"
-Good response: "यह Ghirardelli 86% डार्क चॉकलेट बार प्रति सर्विंग (34 ग्राम) में 190 कैलोरी प्रदान करता है।
-Bad response: "This Ghirardelli 86% dark chocolate bar contains 190 calories per serving (40g).
-Question asked in: Hindi"
-"""
+    print("Warning: GOOGLE_APPLICATION_CREDENTIALS not found in .env file")
+    credentials_path = None
 
 
 class ObjectDetectionAgent:
@@ -59,15 +26,41 @@ class ObjectDetectionAgent:
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-1.5-flash')
         
-        # Initialize Google Cloud TTS
-        try:
-            # Credentials are already set up at module level
+        # Initialize Google Cloud TTS client lazily (only when needed)
+        self.tts_client = None
+        
+    def _initialize_tts_client(self):
+        """Lazily initialize the Text-to-Speech client only when needed"""
+        if self.tts_client is None:
+            # Check credentials path
+            global credentials_path
+            
+            if not credentials_path:
+                raise ValueError("GOOGLE_APPLICATION_CREDENTIALS not found in .env file")
+                
+            # Convert relative path to absolute if needed
+            if not os.path.isabs(credentials_path):
+                base_dir = pathlib.Path(__file__).parent.parent
+                credentials_path = os.path.join(base_dir, credentials_path)
+                
+            # Verify the credentials file exists
+            if not os.path.exists(credentials_path):
+                raise ValueError(f"Google Cloud credentials file not found at: {credentials_path}")
+                
+            # Set the environment variable with the absolute path
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+            
+            # Initialize the client
             self.tts_client = texttospeech.TextToSpeechClient()
+            
+    def synthesize_speech(self, text: str, language: str) -> str:
+        # Initialize TTS client if needed
+        try:
+            self._initialize_tts_client()
         except Exception as e:
             print(f"Error initializing TTS client: {str(e)}")
-            raise
-        
-    def synthesize_speech(self, text: str, language: str) -> str:
+            return None
+            
         # Map of language codes to single appropriate Wavenet voice
         language_voices = {
             'english': ('en-US', 'en-US-Wavenet-D'),
@@ -121,7 +114,7 @@ class ObjectDetectionAgent:
                 return base64.b64encode(response.audio_content).decode('utf-8')
             except Exception as e:
                 print(f"Error with fallback voice: {str(e)}")
-                raise
+                return None
         
     async def process_input(self, audio_base64: str, image_base64: str) -> AsyncGenerator[str, None]:
         try:
@@ -167,18 +160,58 @@ class ObjectDetectionAgent:
             text_response = parts[0].strip()
             language = parts[1].strip() if len(parts) > 1 else "English"
             
-            # Convert to speech
-            audio_content = self.synthesize_speech(text_response, language)
-            
-            # Return audio content
-            yield json.dumps({
-                "audio": audio_content,
-                "language": language
-            })
+            # Try to convert to speech
+            try:
+                audio_content = self.synthesize_speech(text_response, language)
+                if audio_content:
+                    # Return audio content
+                    yield json.dumps({
+                        "audio": audio_content,
+                        "language": language
+                    })
+                else:
+                    # Fall back to text-only response if TTS fails
+                    yield json.dumps({
+                        "text": text_response,
+                        "language": language
+                    })
+            except Exception as e:
+                print(f"Error in speech synthesis: {str(e)}")
+                # Fall back to text-only response
+                yield json.dumps({
+                    "text": text_response,
+                    "language": language
+                })
                     
         except Exception as e:
             error_msg = f"Error in ObjectDetectionAgent: {str(e)}"
             print(error_msg)
-            yield error_msg
+            yield json.dumps({
+                "error": error_msg
+            })
+
+
+# Define DEFAULT_PROMPT here to avoid NameError
+DEFAULT_PROMPT = """
+You are a helpful AI assistant. When you receive audio and an image:
+1. Focus on answering the question asked in the audio in the same language.
+2. If the question is asked in Hindi, reply in Hindi. If in Spanish, reply in Spanish.
+3. Only describe the image if the question is about the image, I repeat if no queesion is asked in the audio then dont say anything.
+4. Don't describe that you received an audio or image input.
+5. If the question is about a particular product analyze first what is that product actually by reading the label etc then answer about that product from your knowledgebase.
+6. At the end of your response, add: "Question asked in: [language]"
+
+Example 1:
+If audio asks: "How many calories in this chocolate?"
+Bad response: "The audio contains someone asking about calories. The image shows a chocolate bar..."
+Good response: "This Ghirardelli 86% dark chocolate bar contains 190 calories per serving (40g).
+Question asked in: English"
+
+Example 2:
+If audio asks: "इस चॉकलेट में कितनी कैलोरी हैं?"
+Good response: "यह Ghirardelli 86% डार्क चॉकलेट बार प्रति सर्विंग (34 ग्राम) में 190 कैलोरी प्रदान करता है।
+Bad response: "This Ghirardelli 86% dark chocolate bar contains 190 calories per serving (40g).
+Question asked in: Hindi"
+"""
 
 
