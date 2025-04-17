@@ -131,8 +131,8 @@ GOOGLE_APPLICATION_CREDENTIALS=credentials/google-cloud-credentials.json
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/zeroinfinity03/KnowFlow.git
-cd knowflow
+git clone https://github.com/zeroinfinity03/knowflow-beta1.0.git
+cd knowflow-beta1.0
 ```
 
 2. Choose the appropriate setup method for your operating system:
